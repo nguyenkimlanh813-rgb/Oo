@@ -1,0 +1,842 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Người Vận Chuyển 3D</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#9edcf7;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block}
+#hud{position:fixed;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:6px;z-index:5;pointer-events:none}
+.info{background:#182632e8;color:white;padding:9px 11px;border-radius:12px;font-size:12px;box-shadow:0 3px 10px #0003}
+#mission{position:fixed;top:60px;left:50%;transform:translateX(-50%);width:max-content;max-width:75%;background:#ffffffed;color:#19242b;padding:10px 13px;border-radius:12px;font-size:12px;font-weight:bold;text-align:center;z-index:5;box-shadow:0 3px 12px #0003}
+#distance{font-weight:normal;color:#237a45}
+#mapBox{position:fixed;right:10px;bottom:12px;width:145px;height:145px;border:3px solid white;border-radius:15px;overflow:hidden;background:#709c5c;z-index:7;box-shadow:0 3px 15px #0005}
+#map{width:100%;height:100%}
+#mapTitle{position:absolute;top:4px;left:5px;padding:4px 6px;background:#15232bdb;color:white;border-radius:5px;font-size:9px}
+#joystick{position:fixed;left:17px;bottom:23px;width:126px;height:126px;border:3px solid #ffffffc9;border-radius:50%;background:#18263270;z-index:10;touch-action:none;box-shadow:0 3px 10px #0003}
+#stick{position:absolute;left:50%;top:50%;width:51px;height:51px;margin:-25.5px;border-radius:50%;background:linear-gradient(145deg,#fff,#c9d5df);border:3px solid white;box-shadow:0 3px 9px #0005;pointer-events:none}
+#controls{position:fixed;right:168px;bottom:25px;display:flex;flex-direction:column;gap:9px;z-index:10}
+.btn{border:2px solid #ffffffbd;border-radius:50%;width:58px;height:58px;background:#172732e8;color:white;font-weight:bold;font-size:12px;touch-action:none}
+#gas{background:#197a50}
+#brake{background:#ae3b36}
+#unstuck{position:fixed;right:10px;top:103px;z-index:10;border:0;border-radius:8px;padding:9px;background:#172732e8;color:white;font-size:11px}
+#toast{position:fixed;left:50%;top:43%;transform:translate(-50%,-50%);z-index:20;display:none;background:#14252ff5;color:white;border-radius:14px;padding:15px 19px;text-align:center;font-weight:bold;max-width:85%}
+#start{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:25px;background:linear-gradient(#15384dcc,#09151df5);color:white}
+#start h1{font-size:29px;margin:0 0 12px}
+#start p{font-size:14px;line-height:1.7;max-width:380px}
+#play{border:0;border-radius:14px;padding:15px 34px;background:#ffce46;font-size:17px;font-weight:bold;color:#222}
+@media(max-width:430px){
+ #mapBox{width:112px;height:112px;right:7px;bottom:9px}
+ #controls{right:127px;bottom:22px}
+ #joystick{width:112px;height:112px;left:12px;bottom:20px}
+ #mission{top:58px;font-size:11px}
+ .info{font-size:10px;padding:8px 6px}
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+ <div class="info">💰 <b id="money">0</b></div>
+ <div class="info">🚚 <b id="speed">0</b> km/h</div>
+ <div class="info">📦 Đơn: <b id="orders">0</b></div>
+</div>
+
+<div id="mission">
+ 📦 Đến kho nhận hàng
+ <div id="distance">Đích đến được đánh dấu trên bản đồ</div>
+</div>
+
+<button id="unstuck">↻ XE BỊ KẸT</button>
+
+<div id="joystick"><div id="stick"></div></div>
+<div id="controls">
+ <button class="btn" id="gas">🚀<br>GA</button>
+ <button class="btn" id="brake">🛑<br>PHANH</button>
+</div>
+
+<div id="mapBox">
+ <canvas id="map" width="280" height="280"></canvas>
+ <div id="mapTitle">BẢN ĐỒ XOAY</div>
+</div>
+
+<div id="toast"></div>
+
+<div id="start">
+ <h1>🚚 NGƯỜI VẬN CHUYỂN 3D</h1>
+ <p>Thành phố mở, đường rộng, xe cộ và người đi bộ. Lấy hàng tại kho rồi giao đến địa chỉ được đánh dấu màu xanh.</p>
+ <p>🕹️ Kéo joystick lên để tiến, xuống để lùi, trái phải để đánh lái. Bản đồ xoay theo hướng xe.</p>
+ <button id="play">CHƠI NGAY</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(()=>{
+"use strict";
+const $=id=>document.getElementById(id);
+
+/* ===== THẾ GIỚI 3D ===== */
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9edcf7);
+scene.fog=new THREE.Fog(0x9edcf7,150,450);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,1000);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xeaf7ff,0x68794b,2));
+
+const sun=new THREE.DirectionalLight(0xffffff,2);
+sun.position.set(-50,90,40);
+sun.castShadow=true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left=-130;
+sun.shadow.camera.right=130;
+sun.shadow.camera.top=130;
+sun.shadow.camera.bottom=-130;
+scene.add(sun);
+
+const mat=(color,roughness=.85)=>new THREE.MeshStandardMaterial({color,roughness});
+const grass=mat(0x78ad60);
+const roadMat=mat(0x41474d);
+const sidewalk=mat(0xbebdb2);
+const whiteLine=mat(0xf2eee0);
+const yellowLine=mat(0xffd34c);
+const glass=new THREE.MeshStandardMaterial({color:0x8fd6ed,roughness:.28});
+const black=mat(0x202429);
+const wood=mat(0x765039);
+const roofColors=[0x965449,0x565c6c,0x77604c,0x73506b];
+const houseColors=[0xf0d4ae,0xe3e8eb,0xd9e8d1,0xe8c3b8,0xe3d7f1];
+
+function box(parent,x,y,z,w,h,d,material,cast=true){
+ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+ o.position.set(x,y,z);
+ o.castShadow=cast;
+ o.receiveShadow=true;
+ parent.add(o);
+ return o;
+}
+function ground(x,z,w,d,material,y=-.18){
+ return box(scene,x,y,z,w,.2,d,material,false);
+}
+
+/* ===== ĐƯỜNG PHỐ RỘNG =====
+   Mỗi tuyến đường rộng 28 đơn vị.
+   Hai chiều, vạch vàng ở giữa và vạch trắng phân làn.
+*/
+const roads=[];
+for(let p=-200;p<=200;p+=80)roads.push(p);
+
+ground(0,0,540,540,grass,-.32);
+
+for(const p of roads){
+ ground(p,0,28,520,roadMat,-.16);
+ ground(0,p,520,28,roadMat,-.16);
+
+ // Vạch vàng chính giữa
+ for(let q=-250;q<=250;q+=13){
+  ground(p,q,.28,5,yellowLine,-.045);
+  ground(q,p,5,.28,yellowLine,-.045);
+ }
+
+ // Vạch trắng chia làn
+ for(const offset of [-7,7]){
+  for(let q=-250;q<=250;q+=15){
+   ground(p+offset,q,.16,5,whiteLine,-.04);
+   ground(q,p+offset,5,.16,whiteLine,-.04);
+  }
+ }
+
+ // Vỉa hè
+ ground(p-16.2,0,3.8,520,sidewalk,-.1);
+ ground(p+16.2,0,3.8,520,sidewalk,-.1);
+ ground(0,p-16.2,520,3.8,sidewalk,-.1);
+ ground(0,p+16.2,520,3.8,sidewalk,-.1);
+
+ // Vạch qua đường ở giao lộ
+ for(let n=-4;n<=4;n++){
+  ground(p+n*1.65,p-13.2,1.1,3.1,whiteLine,-.025);
+  ground(p-13.2,p+n*1.65,3.1,1.1,whiteLine,-.025);
+ }
+}
+
+/* ===== NHÀ THƯA Ở HAI BÊN ĐƯỜNG ===== */
+const blockers=[];
+const houseRecords=[];
+const pedestrians=[];
+const traffic=[];
+
+function addBlock(x,z,w,d,type="building"){
+ blockers.push({x,z,hw:w/2,hd:d/2,type});
+}
+
+function tree(x,z){
+ const g=new THREE.Group();
+ g.position.set(x,0,z);
+ scene.add(g);
+ box(g,0,1,0,.5,2,.5,wood);
+ const crown=new THREE.Mesh(
+  new THREE.SphereGeometry(1.4,9,8),
+  mat(0x398247)
+ );
+ crown.position.y=2.9;
+ crown.castShadow=true;
+ g.add(crown);
+}
+
+function house(x,z,i){
+ const w=10+(i%3)*1.5;
+ const d=10+(i%2)*1.5;
+ const h=5.5;
+ box(scene,x,h/2,z,w,h,d,mat(houseColors[i%houseColors.length]));
+ box(scene,x,h+.6,z,w+1.1,1.2,d+1.1,mat(roofColors[i%roofColors.length]));
+ box(scene,x,1.35,z+d/2+.08,1.3,2.7,.16,wood);
+ box(scene,x-w/2-.07,3,z,.15,1.4,1.7,glass);
+ box(scene,x+w/2+.07,3,z,.15,1.4,1.7,glass);
+ addBlock(x,z,w+1.2,d+1.2);
+
+ // Cây ở sân nhà
+ tree(x-w/2-2,z+d/2+3);
+
+ houseRecords.push({x,z,w,d});
+}
+
+// Chỉ xây nhà ở các ô phố xen kẽ, không lấp kín thành phố.
+let hi=0;
+for(let gx=-200;gx<=200;gx+=80){
+ for(let gz=-200;gz<=200;gz+=80){
+  if(Math.abs(gx)<50&&Math.abs(gz)<50)continue;
+  for(const sx of [-1,1]){
+   for(const sz of [-1,1]){
+    const x=gx+sx*23;
+    const z=gz+sz*23;
+    if(Math.abs(x)>225||Math.abs(z)>225)continue;
+    house(x,z,hi++);
+   }
+  }
+ }
+}
+
+/* ===== KHO NHẬN HÀNG ===== */
+const warehouse={x:40,z:-40,w:15,d:12};
+box(scene,warehouse.x,3.8,warehouse.z,warehouse.w,7.6,warehouse.d,mat(0xdce4e9));
+box(scene,warehouse.x,7.8,warehouse.z,warehouse.w+1,.7,warehouse.d+1,mat(0x42647e));
+box(scene,warehouse.x,2.2,warehouse.z+warehouse.d/2+.08,5,4.4,.18,mat(0x354550));
+box(scene,warehouse.x,5.8,warehouse.z+warehouse.d/2+.2,7,.8,.2,mat(0xffd04a));
+addBlock(warehouse.x,warehouse.z,warehouse.w+1,warehouse.d+1,"warehouse");
+
+/* ===== XE CỦA NGƯỜI CHƠI =====
+   Đầu xe hướng về trục -Z khi yaw = 0.
+*/
+const car=new THREE.Group();
+scene.add(car);
+
+box(car,0,1.05,0,2.45,1.05,4.6,mat(0x147fca));
+box(car,0,1.95,-.45,2.05,1.05,2.15,mat(0x0873b9));
+box(car,0,2,-.45,2.08,.72,1.95,glass);
+box(car,0,1.05,-2.35,2.15,.45,.22,mat(0x30363b));
+box(car,-.8,1.3,-2.4,.35,.24,.12,mat(0xfff1a0));
+box(car,.8,1.3,-2.4,.35,.24,.12,mat(0xfff1a0));
+box(car,-.8,.8,2.35,.35,.24,.12,mat(0xf13b32));
+box(car,.8,.8,2.35,.35,.24,.12,mat(0xf13b32));
+
+const wheels=[];
+for(const x of [-1.25,1.25]){
+ for(const z of [-1.5,1.5]){
+  const w=new THREE.Mesh(new THREE.CylinderGeometry(.43,.43,.3,14),black);
+  w.rotation.z=Math.PI/2;
+  w.position.set(x,.47,z);
+  w.castShadow=true;
+  car.add(w);
+  wheels.push(w);
+ }
+}
+car.position.set(40,0,0);
+
+let yaw=0,speed=0,money=0,orders=0,started=false;
+
+/* ===== ĐIỂM LẤY VÀ GIAO HÀNG ===== */
+function marker(x,z,color){
+ const g=new THREE.Group();
+ g.position.set(x,0,z);
+ scene.add(g);
+
+ const ring=new THREE.Mesh(
+  new THREE.TorusGeometry(4,.35,10,32),
+  new THREE.MeshBasicMaterial({color})
+ );
+ ring.rotation.x=-Math.PI/2;
+ ring.position.y=.18;
+ g.add(ring);
+
+ const pole=new THREE.Mesh(
+  new THREE.CylinderGeometry(.15,.15,5,10),
+  new THREE.MeshBasicMaterial({color,transparent:true,opacity:.8})
+ );
+ pole.position.y=2.8;
+ g.add(pole);
+
+ const arrow=new THREE.Mesh(
+  new THREE.ConeGeometry(1.25,2.1,4),
+  new THREE.MeshBasicMaterial({color})
+ );
+ arrow.position.y=5.8;
+ g.add(arrow);
+
+ const spriteCanvas=document.createElement("canvas");
+ spriteCanvas.width=256;
+ spriteCanvas.height=64;
+ const c=spriteCanvas.getContext("2d");
+ c.fillStyle="#13232be8";
+ c.fillRect(0,0,256,64);
+ c.fillStyle="#ffffff";
+ c.font="bold 26px Arial";
+ c.textAlign="center";
+ c.fillText(color===0x39ff83?"GIAO HÀNG":"LẤY HÀNG",128,41);
+ const tex=new THREE.CanvasTexture(spriteCanvas);
+ const sign=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));
+ sign.scale.set(9,2.25,1);
+ sign.position.y=8;
+ g.add(sign);
+
+ return g;
+}
+
+const pickup={x:40,z:-20};
+const pickupMarker=marker(pickup.x,pickup.z,0xffd33b);
+let delivery=null,deliveryMarker=null;
+let mission="pickup",cooldown=0;
+
+function setMission(){
+ $("mission").firstChild.textContent=
+  mission==="pickup"?"📦 Đến kho nhận hàng":"🏠 Giao hàng tại điểm xanh";
+}
+
+function toast(text){
+ const el=$("toast");
+ el.textContent=text;
+ el.style.display="block";
+ clearTimeout(toast.timer);
+ toast.timer=setTimeout(()=>el.style.display="none",2200);
+}
+
+/* ===== VA CHẠM ===== */
+function blockedPoint(x,z,r=1.25){
+ if(Math.abs(x)>250||Math.abs(z)>250)return true;
+ for(const b of blockers){
+  const nx=Math.max(b.x-b.hw,Math.min(x,b.x+b.hw));
+  const nz=Math.max(b.z-b.hd,Math.min(z,b.z+b.hd));
+  if((x-nx)**2+(z-nz)**2<r*r)return true;
+ }
+ return false;
+}
+
+function canMove(x,z){
+ // Nhiều điểm kiểm tra quanh thân xe
+ const points=[[0,0],[0,-1.6],[0,1.6],[-.85,0],[.85,0],
+ [-.8,-1.3],[.8,-1.3],[-.8,1.3],[.8,1.3]];
+ const c=Math.cos(yaw),s=Math.sin(yaw);
+ for(const [px,pz] of points){
+  const wx=x+px*c+pz*s;
+  const wz=z-px*s+pz*c;
+  if(blockedPoint(wx,wz))return false;
+ }
+ return true;
+}
+
+/* ===== JOYSTICK HÌNH TRÒN ===== */
+const joy=$("joystick"),stick=$("stick");
+let jx=0,jy=0,joyOn=false,joyId=null;
+let gasOn=false,brakeOn=false;
+
+function joystickMove(e){
+ const r=joy.getBoundingClientRect();
+ let dx=e.clientX-(r.left+r.width/2);
+ let dy=e.clientY-(r.top+r.height/2);
+ const max=r.width*.32;
+ const len=Math.hypot(dx,dy);
+ if(len>max){dx=dx/len*max;dy=dy/len*max;}
+ jx=dx/max;
+ jy=dy/max;
+ stick.style.transform=`translate(${dx}px,${dy}px)`;
+}
+function joystickEnd(){
+ joyOn=false;
+ joyId=null;
+ jx=jy=0;
+ stick.style.transform="translate(0px,0px)";
+}
+joy.addEventListener("pointerdown",e=>{
+ e.preventDefault();
+ joyOn=true;
+ joyId=e.pointerId;
+ joy.setPointerCapture(e.pointerId);
+ joystickMove(e);
+});
+joy.addEventListener("pointermove",e=>{
+ if(joyOn&&e.pointerId===joyId)joystickMove(e);
+});
+joy.addEventListener("pointerup",joystickEnd);
+joy.addEventListener("pointercancel",joystickEnd);
+joy.addEventListener("lostpointercapture",joystickEnd);
+
+function hold(id,fn){
+ const el=$(id);
+ el.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  fn(true);
+  try{el.setPointerCapture(e.pointerId)}catch(_){}
+ });
+ el.addEventListener("pointerup",()=>fn(false));
+ el.addEventListener("pointercancel",()=>fn(false));
+ el.addEventListener("lostpointercapture",()=>fn(false));
+}
+hold("gas",v=>gasOn=v);
+hold("brake",v=>brakeOn=v);
+
+const keys={};
+addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+function controls(){
+ let throttle=joyOn?-jy:0;
+ let steer=joyOn?jx:0;
+
+ if(gasOn)throttle=Math.max(throttle,1);
+ if(brakeOn)throttle=Math.min(throttle,-1);
+
+ if(!joyOn&&!gasOn&&!brakeOn){
+  if(keys.w||keys.arrowup)throttle=1;
+  if(keys.s||keys.arrowdown)throttle=-1;
+  if(keys.a||keys.arrowleft)steer=-1;
+  if(keys.d||keys.arrowright)steer=1;
+ }
+ return {throttle,steer};
+}
+
+/* ===== TẠO ĐIỂM GIAO TRÊN ĐƯỜNG GẦN NHÀ ===== */
+function chooseDelivery(){
+ const candidates=[];
+ for(const h of houseRecords){
+  const options=[
+   {x:h.x,z:h.z+h.d/2+9},
+   {x:h.x,z:h.z-h.d/2-9},
+   {x:h.x+h.w/2+9,z:h.z},
+   {x:h.x-h.w/2-9,z:h.z}
+  ];
+  for(const p of options){
+   if(!blockedPoint(p.x,p.z,1.4)&&
+      Math.hypot(p.x-car.position.x,p.z-car.position.z)>75){
+    candidates.push(p);
+   }
+  }
+ }
+ // Nếu không tìm được điểm hợp lệ, đặt đích ở đường lớn
+ if(!candidates.length)return{x:120,z:80};
+ return candidates[Math.floor(Math.random()*candidates.length)];
+}
+
+/* ===== VÒNG ĐỜI NHIỆM VỤ ===== */
+function nextMission(){
+ if(cooldown>0)return;
+ cooldown=1.1;
+
+ if(mission==="pickup"){
+  mission="delivery";
+  delivery=chooseDelivery();
+  if(deliveryMarker)scene.remove(deliveryMarker);
+  deliveryMarker=marker(delivery.x,delivery.z,0x39ff83);
+  pickupMarker.visible=false;
+  toast("Đã nhận hàng! Hãy đến điểm xanh.");
+ }else{
+  money+=100;
+  orders++;
+  $("money").textContent=money;
+  $("orders").textContent=orders;
+  mission="pickup";
+  delivery=null;
+  if(deliveryMarker){
+   scene.remove(deliveryMarker);
+   deliveryMarker=null;
+  }
+  pickupMarker.visible=true;
+  toast("Giao hàng thành công! +100 đồng");
+ }
+ setMission();
+}
+
+/* ===== XE CHẠY VÀ CHỐNG KẸT ===== */
+function drive(dt){
+ const input=controls();
+ const throttle=input.throttle;
+ const steer=input.steer;
+
+ if(throttle>.08)speed+=10*throttle*dt;
+ else if(throttle<-.08)speed+=10*throttle*dt;
+ else speed*=Math.pow(.8,dt);
+
+ if(brakeOn)speed*=Math.pow(.015,dt);
+ speed=THREE.MathUtils.clamp(speed,-8,19);
+ if(Math.abs(speed)<.035)speed=0;
+
+ if(Math.abs(speed)>.15){
+  yaw-=steer*1.45*dt*Math.min(1,Math.abs(speed)/3)*Math.sign(speed);
+ }
+
+ const dx=-Math.sin(yaw)*speed*dt;
+ const dz=-Math.cos(yaw)*speed*dt;
+ const steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dz))/.16));
+ const sx=dx/steps,sz=dz/steps;
+
+ for(let i=0;i<steps;i++){
+  const nx=car.position.x+sx;
+  const nz=car.position.z+sz;
+
+  if(canMove(nx,nz)){
+   car.position.x=nx;
+   car.position.z=nz;
+  }else{
+   // Cho xe trượt dọc tường thay vì bị khóa cả hai chiều
+   let moved=false;
+   if(canMove(car.position.x+sx,car.position.z)){
+    car.position.x+=sx;
+    moved=true;
+   }
+   if(canMove(car.position.x,car.position.z+sz)){
+    car.position.z+=sz;
+    moved=true;
+   }
+   if(!moved){
+    speed*=.35;
+    break;
+   }
+  }
+ }
+
+ car.rotation.y=yaw;
+ wheels.forEach(w=>w.rotation.x+=speed*dt);
+ $("speed").textContent=Math.round(Math.abs(speed)*4.1);
+
+ const target=mission==="pickup"?pickup:delivery;
+ if(target&&Math.hypot(car.position.x-target.x,car.position.z-target.z)<6){
+  nextMission();
+ }
+ if(cooldown>0)cooldown-=dt;
+}
+
+/* ===== NGƯỜI ĐI BỘ ===== */
+const personColors=[0xd64f44,0x357fc0,0x439b64,0xe0a445,0x9369b7];
+
+function makePerson(x,z,i){
+ const g=new THREE.Group();
+ g.position.set(x,0,z);
+ scene.add(g);
+ box(g,0,1.05,0,.55,1.05,.4,mat(personColors[i%personColors.length]));
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.27,10,8),mat(0xe7b58e));
+ head.position.y=1.78;
+ g.add(head);
+ const legs=[];
+ for(const side of [-1,1]){
+  legs.push(box(g,side*.15,.4,0,.2,.8,.22,mat(0x304e8a)));
+ }
+ pedestrians.push({g,x,z,phase:Math.random()*6,legs});
+}
+
+// Người xuất hiện rải rác ở vỉa hè, tránh nhà và đường xe chạy.
+for(let i=0;i<34;i++){
+ const road=roads[1+Math.floor(Math.random()*(roads.length-2))];
+ const along=-190+Math.random()*380;
+ let x,z;
+ if(Math.random()<.5){
+  x=road+(Math.random()<.5?-1:1)*18.7;
+  z=along;
+ }else{
+  x=along;
+  z=road+(Math.random()<.5?-1:1)*18.7;
+ }
+ if(!blockedPoint(x,z,.5))makePerson(x,z,i);
+}
+
+function updatePeople(dt){
+ for(const p of pedestrians){
+  p.phase+=dt*3;
+  p.legs[0].rotation.x=Math.sin(p.phase)*.38;
+  p.legs[1].rotation.x=-Math.sin(p.phase)*.38;
+ }
+}
+
+/* ===== XE GIAO THÔNG ===== */
+const trafficColors=[0xe5e5e5,0xd84940,0x3486c9,0x333a42,0xe3b739];
+
+function makeTraffic(i){
+ const g=new THREE.Group();
+ scene.add(g);
+ box(g,0,.75,0,2, .9,4,mat(trafficColors[i%trafficColors.length]));
+ box(g,0,1.4,-.3,1.65,.65,1.8,glass);
+
+ for(const x of [-1,1]){
+  for(const z of [-1.2,1.2]){
+   const wheel=new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,.18,10),black);
+   wheel.rotation.z=Math.PI/2;
+   wheel.position.set(x,.32,z);
+   g.add(wheel);
+  }
+ }
+ traffic.push({
+  g,horizontal:i%2===0,
+  road:roads[1+(i%3)],
+  offset:i%2===0?(i%4<2?-3.5:3.5):(i%4<2?3.5:-3.5),
+  pos:-220+i*38,
+  dir:i%4<2?1:-1,
+  speed:5+(i%4)*1.7
+ });
+}
+for(let i=0;i<10;i++)makeTraffic(i);
+
+function updateTraffic(dt){
+ for(const t of traffic){
+  t.pos+=t.dir*t.speed*dt;
+  if(t.pos>235)t.pos=-235;
+  if(t.pos< -235)t.pos=235;
+
+  if(t.horizontal){
+   t.g.position.set(t.pos,0,t.road+t.offset);
+   t.g.rotation.y=t.dir>0?-Math.PI/2:Math.PI/2;
+  }else{
+   t.g.position.set(t.road+t.offset,0,t.pos);
+   t.g.rotation.y=t.dir>0?Math.PI:0;
+  }
+ }
+}
+
+/* ===== BẢN ĐỒ MINI =====
+   X/Z lấy trực tiếp từ thế giới 3D.
+   Khi xe rẽ, bản đồ xoay ngược tương ứng để đầu xe luôn hướng lên.
+*/
+const mapCanvas=$("map");
+const ctx=mapCanvas.getContext("2d");
+const MS=280,C=140,SCALE=.85;
+
+function mapPoint(wx,wz){
+ const dx=wx-car.position.x;
+ const dz=wz-car.position.z;
+ const c=Math.cos(yaw),s=Math.sin(yaw);
+ return{
+  x:C+(dx*c-dz*s)*SCALE,
+  y:C+(dx*s+dz*c)*SCALE
+ };
+}
+
+function drawMap(){
+ ctx.clearRect(0,0,MS,MS);
+ ctx.fillStyle="#739e5f";
+ ctx.fillRect(0,0,MS,MS);
+
+ ctx.save();
+ ctx.beginPath();
+ ctx.rect(0,0,MS,MS);
+ ctx.clip();
+
+ // Đường lớn đúng tọa độ thế giới
+ for(const p of roads){
+  const a=mapPoint(p,-270),b=mapPoint(p,270);
+  const c=mapPoint(-270,p),d=mapPoint(270,p);
+
+  ctx.strokeStyle="#41484e";
+  ctx.lineWidth=28*SCALE;
+  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);ctx.stroke();
+
+  ctx.strokeStyle="#f0ca4b";
+  ctx.lineWidth=1.7;
+  ctx.setLineDash([5,6]);
+  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(d.x,d.y);ctx.stroke();
+  ctx.setLineDash([]);
+ }
+
+ // Nhà vẽ theo bốn góc tọa độ thật
+ for(const h of houseRecords){
+  const pts=[
+   mapPoint(h.x-h.w/2,h.z-h.d/2),
+   mapPoint(h.x+h.w/2,h.z-h.d/2),
+   mapPoint(h.x+h.w/2,h.z+h.d/2),
+   mapPoint(h.x-h.w/2,h.z+h.d/2)
+  ];
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.closePath();
+  ctx.fillStyle="#dfc39f";
+  ctx.fill();
+  ctx.strokeStyle="#725c48";
+  ctx.lineWidth=1;
+  ctx.stroke();
+ }
+
+ // Kho: cùng tâm và kích thước với nhà kho 3D
+ const wh=[
+  mapPoint(warehouse.x-warehouse.w/2,warehouse.z-warehouse.d/2),
+  mapPoint(warehouse.x+warehouse.w/2,warehouse.z-warehouse.d/2),
+  mapPoint(warehouse.x+warehouse.w/2,warehouse.z+warehouse.d/2),
+  mapPoint(warehouse.x-warehouse.w/2,warehouse.z+warehouse.d/2)
+ ];
+ ctx.beginPath();
+ ctx.moveTo(wh[0].x,wh[0].y);
+ for(let i=1;i<4;i++)ctx.lineTo(wh[i].x,wh[i].y);
+ ctx.closePath();
+ ctx.fillStyle="#ffcf38";
+ ctx.fill();
+
+ // Điểm nhận hàng màu vàng, điểm giao hàng màu xanh
+ const target=mission==="pickup"?pickup:delivery;
+ if(target){
+  const p=mapPoint(target.x,target.z);
+  const color=mission==="pickup"?"#ffda31":"#39ff83";
+  ctx.fillStyle=color;
+  ctx.strokeStyle="#17232b";
+  ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(p.x,p.y,7,0,Math.PI*2);
+  ctx.fill();ctx.stroke();
+
+  // Chấm tâm đích
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath();ctx.arc(p.x,p.y,2.4,0,Math.PI*2);ctx.fill();
+ }
+
+ // Xe giao thông
+ for(const t of traffic){
+  const x=t.horizontal?t.pos:t.road+t.offset;
+  const z=t.horizontal?t.road+t.offset:t.pos;
+  const p=mapPoint(x,z);
+  ctx.fillStyle="#ee5d4c";
+  ctx.fillRect(p.x-2.5,p.y-4,5,8);
+ }
+
+ ctx.restore();
+
+ // Xe người chơi cố định ở giữa, mũi xe luôn chỉ lên
+ ctx.save();
+ ctx.translate(C,C);
+ ctx.fillStyle="#fff";
+ ctx.strokeStyle="#16242c";
+ ctx.lineWidth=2.5;
+ ctx.beginPath();
+ ctx.moveTo(0,-12);
+ ctx.lineTo(8,8);
+ ctx.lineTo(0,4);
+ ctx.lineTo(-8,8);
+ ctx.closePath();
+ ctx.fill();
+ ctx.stroke();
+ ctx.restore();
+
+ ctx.strokeStyle="#ffffff80";
+ ctx.lineWidth=2;
+ ctx.strokeRect(1,1,MS-2,MS-2);
+}
+
+/* ===== CAMERA BÁM SAU XE ===== */
+const cameraPos=new THREE.Vector3();
+const lookTarget=new THREE.Vector3();
+
+function followCamera(dt){
+ const fx=-Math.sin(yaw);
+ const fz=-Math.cos(yaw);
+ cameraPos.set(
+  car.position.x-fx*12,
+  7,
+  car.position.z-fz*12
+ );
+ camera.position.lerp(cameraPos,1-Math.exp(-4.5*dt));
+ lookTarget.set(car.position.x,1.4,car.position.z);
+ camera.lookAt(lookTarget);
+}
+
+/* ===== NÚT THOÁT KẸT ===== */
+$("unstuck").addEventListener("click",()=>{
+ speed=0;
+ let found=null;
+ let best=Infinity;
+ for(const road of roads){
+  for(const p of [
+   {x:road,z:0},{x:0,z:road},
+   {x:road+5,z:0},{x:0,z:road+5}
+  ]){
+   if(canMove(p.x,p.z)){
+    const d=Math.hypot(p.x-car.position.x,p.z-car.position.z);
+    if(d<best){best=d;found=p;}
+   }
+  }
+ }
+ if(!found)found={x:40,z:0};
+ car.position.set(found.x,0,found.z);
+ yaw=0;
+ car.rotation.y=0;
+ toast("Đã đưa xe về vị trí đường an toàn!");
+});
+
+/* ===== BẮT ĐẦU ===== */
+$("play").addEventListener("click",()=>{
+ started=true;
+ $("start").style.display="none";
+ car.position.set(40,0,0);
+ yaw=0;
+ speed=0;
+ setMission();
+ drawMap();
+});
+
+/* ===== CẬP NHẬT GIAO DIỆN ===== */
+function updateMissionUI(){
+ const target=mission==="pickup"?pickup:delivery;
+ if(!target)return;
+ const d=Math.round(Math.hypot(
+  target.x-car.position.x,
+  target.z-car.position.z
+ ));
+ $("distance").textContent="Còn khoảng "+d+" m đến điểm "+(mission==="pickup"?"nhận hàng":"giao hàng");
+}
+
+/* ===== GAME LOOP ===== */
+let previous=performance.now();
+
+function animate(now){
+ requestAnimationFrame(animate);
+ const dt=Math.min((now-previous)/1000,.035);
+ previous=now;
+
+ if(started){
+  drive(dt);
+  updateTraffic(dt);
+  updatePeople(dt);
+  followCamera(dt);
+  updateMissionUI();
+
+  pickupMarker.position.y=.08+Math.sin(now*.003)*.13;
+  if(deliveryMarker)deliveryMarker.position.y=.08+Math.sin(now*.003)*.13;
+
+  drawMap();
+ }
+ renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+
+})();
+</script>
+</body>
+</html>
